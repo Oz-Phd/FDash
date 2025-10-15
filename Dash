@@ -1,0 +1,208 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Plus, Target, CheckCircle, Clock, TrendingUp } from "lucide-react";
+import { AnimatePresence } from "framer-motion";
+
+import HealthScore from "../components/dashboard/HealthScore";
+import StatsCard from "../components/dashboard/StatsCard";
+import GoalCard from "../components/dashboard/GoalCard";
+import GoalForm from "../components/dashboard/GoalForm";
+import ProgressModal from "../components/dashboard/ProgressModal";
+
+export default function Dashboard() {
+  const [showGoalForm, setShowGoalForm] = useState(false);
+  const [editingGoal, setEditingGoal] = useState(null);
+  const [progressGoal, setProgressGoal] = useState(null);
+  const queryClient = useQueryClient();
+
+  const { data: goals, isLoading } = useQuery({
+    queryKey: ['goals'],
+    queryFn: () => base44.entities.Goal.list('-created_date'),
+    initialData: [],
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (goalData) => base44.entities.Goal.create(goalData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
+      setShowGoalForm(false);
+      setEditingGoal(null);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.Goal.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
+      setShowGoalForm(false);
+      setEditingGoal(null);
+    },
+  });
+
+  const handleSaveGoal = (goalData) => {
+    if (editingGoal) {
+      updateMutation.mutate({ id: editingGoal.id, data: goalData });
+    } else {
+      createMutation.mutate(goalData);
+    }
+  };
+
+  const handleUpdateProgress = (goalId, data) => {
+    updateMutation.mutate({ id: goalId, data });
+  };
+
+  const calculateHealth = () => {
+    if (goals.length === 0) return 0;
+    const activeGoals = goals.filter(g => g.status === 'active');
+    if (activeGoals.length === 0) return 100;
+    
+    const totalProgress = activeGoals.reduce((sum, goal) => {
+      const progress = goal.target_value > 0 ? (goal.current_value / goal.target_value) * 100 : 0;
+      return sum + progress;
+    }, 0);
+    
+    return Math.round(totalProgress / activeGoals.length);
+  };
+
+  const stats = {
+    total: goals.length,
+    completed: goals.filter(g => g.status === 'completed').length,
+    active: goals.filter(g => g.status === 'active').length,
+    avgProgress: goals.length > 0 
+      ? Math.round(goals.reduce((sum, g) => sum + ((g.current_value / g.target_value) * 100 || 0), 0) / goals.length)
+      : 0
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/30">
+      <div className="max-w-7xl mx-auto p-4 md:p-8">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-gray-900 via-blue-900 to-purple-900 bg-clip-text text-transparent">
+              Goal Dashboard
+            </h1>
+            <p className="text-gray-600 mt-2">Track your progress and achieve your goals</p>
+          </div>
+          <Button
+            onClick={() => {
+              setEditingGoal(null);
+              setShowGoalForm(true);
+            }}
+            size="lg"
+            className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg shadow-blue-500/30"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add New Goal
+          </Button>
+        </div>
+
+        {/* Goal Form */}
+        <AnimatePresence>
+          {showGoalForm && (
+            <div className="mb-8">
+              <GoalForm
+                goal={editingGoal}
+                onSave={handleSaveGoal}
+                onCancel={() => {
+                  setShowGoalForm(false);
+                  setEditingGoal(null);
+                }}
+              />
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Health Score - Full Width */}
+        <div className="mb-8">
+          <HealthScore score={calculateHealth()} trend={5} />
+        </div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <StatsCard
+            title="Total Goals"
+            value={stats.total}
+            subtitle="All time"
+            icon={Target}
+            color="from-blue-500 to-blue-600"
+            delay={0.1}
+          />
+          <StatsCard
+            title="Completed"
+            value={stats.completed}
+            subtitle={`${stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}% success rate`}
+            icon={CheckCircle}
+            color="from-green-500 to-emerald-600"
+            delay={0.2}
+          />
+          <StatsCard
+            title="Active Goals"
+            value={stats.active}
+            subtitle="In progress"
+            icon={Clock}
+            color="from-orange-500 to-amber-600"
+            delay={0.3}
+          />
+          <StatsCard
+            title="Avg Progress"
+            value={`${stats.avgProgress}%`}
+            subtitle="Across all goals"
+            icon={TrendingUp}
+            color="from-purple-500 to-purple-600"
+            delay={0.4}
+          />
+        </div>
+
+        {/* Goals Grid */}
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">Your Goals</h2>
+          {isLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-64 bg-gray-100 rounded-xl animate-pulse" />
+              ))}
+            </div>
+          ) : goals.length === 0 ? (
+            <div className="text-center py-16 bg-white rounded-2xl border-2 border-dashed border-gray-200">
+              <Target className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">No goals yet</h3>
+              <p className="text-gray-600 mb-6">Start by creating your first goal to track progress</p>
+              <Button
+                onClick={() => setShowGoalForm(true)}
+                className="bg-gradient-to-r from-blue-600 to-blue-700"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Create Your First Goal
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {goals.map((goal) => (
+                <GoalCard
+                  key={goal.id}
+                  goal={goal}
+                  onEdit={(goal) => {
+                    setEditingGoal(goal);
+                    setShowGoalForm(true);
+                  }}
+                  onUpdateProgress={(goal) => setProgressGoal(goal)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Progress Modal */}
+        <ProgressModal
+          goal={progressGoal}
+          isOpen={!!progressGoal}
+          onClose={() => setProgressGoal(null)}
+          onUpdate={handleUpdateProgress}
+        />
+      </div>
+    </div>
+  );
+}
